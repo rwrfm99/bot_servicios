@@ -46,6 +46,7 @@ def setup_logging(log_path: str = "agente_bot.log") -> None:
 class Settings:
     telegram_token: str
     telegram_chat_id: str
+    telegram_allowed_chat_ids: List[str]
     urls: List[str]
     interval_seconds: int = 60
     request_timeout_seconds: int = 10
@@ -55,9 +56,14 @@ class Settings:
     def from_env() -> "Settings":
         token = os.getenv("TELEGRAM_TOKEN", "").strip()
         chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        raw_allowed_chat_ids = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
 
         raw_urls = os.getenv("MONITOR_URLS", "").strip()
         urls = [u.strip() for u in raw_urls.split(",") if u.strip()] if raw_urls else DEFAULT_URLS
+        if raw_allowed_chat_ids:
+            allowed_chat_ids = [c.strip() for c in raw_allowed_chat_ids.split(",") if c.strip()]
+        else:
+            allowed_chat_ids = [chat_id] if chat_id else []
 
         interval = _read_positive_int("CHECK_INTERVAL_SECONDS", 60)
         timeout = _read_positive_int("REQUEST_TIMEOUT_SECONDS", 10)
@@ -73,6 +79,7 @@ class Settings:
         return Settings(
             telegram_token=token,
             telegram_chat_id=chat_id,
+            telegram_allowed_chat_ids=allowed_chat_ids,
             urls=urls,
             interval_seconds=interval,
             request_timeout_seconds=timeout,
@@ -99,13 +106,17 @@ class TelegramNotifier:
         self._timeout = timeout
         self._chat_id = chat_id
         self._endpoint = f"https://api.telegram.org/bot{token}/sendMessage"
+        self._updates_endpoint = f"https://api.telegram.org/bot{token}/getUpdates"
 
     def send(self, message: str) -> None:
+        self.send_to_chat(chat_id=self._chat_id, message=message)
+
+    def send_to_chat(self, chat_id: str, message: str) -> None:
         try:
             response = self._session.post(
                 self._endpoint,
                 data={
-                    "chat_id": self._chat_id,
+                    "chat_id": chat_id,
                     "text": message,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
@@ -122,6 +133,32 @@ class TelegramNotifier:
             )
         except requests.RequestException as exc:
             logging.error("Excepcion enviando mensaje a Telegram: %s", exc)
+
+    def get_updates(self, offset: int | None = None) -> List[dict]:
+        params: Dict[str, int] = {"timeout": 0}
+        if offset is not None:
+            params["offset"] = offset
+        try:
+            response = self._session.get(
+                self._updates_endpoint,
+                params=params,
+                timeout=self._timeout,
+            )
+            if not response.ok:
+                logging.error(
+                    "Error leyendo updates de Telegram. status=%s body=%s",
+                    response.status_code,
+                    response.text,
+                )
+                return []
+            payload = response.json()
+            if not payload.get("ok"):
+                logging.error("Respuesta invalida de Telegram getUpdates: %s", payload)
+                return []
+            return payload.get("result", [])
+        except (ValueError, requests.RequestException) as exc:
+            logging.error("Excepcion leyendo updates de Telegram: %s", exc)
+            return []
 
 
 def build_http_session() -> requests.Session:
@@ -162,6 +199,8 @@ class WebsiteMonitor:
         self.settings = settings
         self.stop_event = threading.Event()
         self.previous_state: Dict[str, bool] = {}
+        self.last_update_id: int | None = None
+        self.allowed_chat_ids = set(settings.telegram_allowed_chat_ids)
         self.heartbeat_path = Path("heartbeat.txt")
         self.session = build_http_session()
         self.notifier = TelegramNotifier(
@@ -179,13 +218,16 @@ class WebsiteMonitor:
     def run(self) -> None:
         logging.info("Monitor iniciado para %s URLs.", len(self.settings.urls))
         logging.info("Lista de URLs: %s", ", ".join(self.settings.urls))
+        logging.info("Chats autorizados para comandos: %s", ", ".join(sorted(self.allowed_chat_ids)))
 
         self._write_heartbeat()
+        self._initialize_update_offset()
         self._send_initial_states()
 
         while not self.stop_event.is_set():
             cycle_start = time.monotonic()
             try:
+                self._process_commands()
                 self._monitor_once()
             except Exception:
                 logging.exception("Error no controlado en el ciclo de monitoreo.")
@@ -197,6 +239,16 @@ class WebsiteMonitor:
             self.stop_event.wait(timeout=sleep_seconds)
 
         self.session.close()
+
+    def _initialize_update_offset(self) -> None:
+        updates = self.notifier.get_updates()
+        if not updates:
+            return
+        update_ids = [u.get("update_id") for u in updates if isinstance(u.get("update_id"), int)]
+        if not update_ids:
+            return
+        self.last_update_id = max(update_ids)
+        logging.info("Offset inicial de Telegram establecido en update_id=%s", self.last_update_id)
 
     def _write_heartbeat(self) -> None:
         try:
@@ -255,6 +307,71 @@ class WebsiteMonitor:
                 logging.info("Recuperacion detectada en %s", url)
 
             self.previous_state[url] = current_up
+
+    def _process_commands(self) -> None:
+        updates = self.notifier.get_updates(
+            offset=(self.last_update_id + 1) if self.last_update_id is not None else None
+        )
+        if not updates:
+            return
+
+        for update in updates:
+            update_id = update.get("update_id")
+            if isinstance(update_id, int):
+                self.last_update_id = update_id
+
+            message = update.get("message") or {}
+            text = (message.get("text") or "").strip()
+            chat = message.get("chat") or {}
+            chat_id_raw = chat.get("id")
+            chat_id = str(chat_id_raw) if chat_id_raw is not None else ""
+
+            if not text:
+                continue
+            if text.split()[0].lower() == "/estado":
+                logging.info("Comando /estado recibido desde chat %s", chat_id)
+                self.notifier.send_to_chat(chat_id=chat_id, message=self._build_status_report())
+                continue
+            if chat_id not in self.allowed_chat_ids:
+                logging.info("Comando ignorado desde chat no autorizado: %s", chat_id)
+                continue
+
+    def _build_status_report(self) -> str:
+        results = self._check_all_urls()
+        checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [f"📊 <b>Estado actual de servicios</b>", f"🕒 <b>Hora:</b> <code>{checked_at}</code>"]
+        up_count = 0
+        down_count = 0
+
+        for url in self.settings.urls:
+            is_up, status_code, latency_ms, error = results.get(url, (False, None, None, "sin resultado"))
+            if is_up:
+                up_count += 1
+            else:
+                down_count += 1
+            host = urlparse(url).netloc or url
+            status_visual = "🟢 <b>UP</b>" if is_up else "🔴 <b>DOWN</b>"
+            http_info = str(status_code) if status_code is not None else "N/A"
+            latency_info = f"{latency_ms} ms" if latency_ms is not None else "N/A"
+            line = (
+                f"\n\n🌐 <b>{escape(host)}</b>\n"
+                f"🔗 {escape(url)}\n"
+                f"📶 {status_visual}\n"
+                f"🧾 HTTP: <code>{http_info}</code>\n"
+                f"⏱️ Latencia: <code>{latency_info}</code>"
+            )
+            if error:
+                line += f"\n⚠️ Error: <code>{escape(error)}</code>"
+            lines.append(line)
+
+        lines.append(
+            f"\n\n📌 <b>Resumen:</b>\n"
+            f"🟢 Activos: <b>{up_count}</b>\n"
+            f"🔴 Caidos: <b>{down_count}</b>\n"
+            f"🧮 Total: <b>{up_count + down_count}</b>"
+        )
+
+        return "".join(lines)
 
     def _check_all_urls(self) -> Dict[str, Tuple[bool, int | None, int | None, str | None]]:
         results: Dict[str, Tuple[bool, int | None, int | None, str | None]] = {}
