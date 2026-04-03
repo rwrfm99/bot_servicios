@@ -1,0 +1,23 @@
+﻿# Entorno local
+.env
+.env.*
+!.env.example
+
+# Logs
+agente_bot.log
+*.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Runtime files
+heartbeat.txt
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
