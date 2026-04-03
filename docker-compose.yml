@@ -1,0 +1,23 @@
+﻿services:
+  telegram-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-monitor
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./agente_bot.log:/app/agente_bot.log
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib,time,sys; p=pathlib.Path('/app/heartbeat.txt'); sys.exit(0 if p.exists() and (time.time()-p.stat().st_mtime)<180 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
