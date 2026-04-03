@@ -28,17 +28,30 @@ DEFAULT_URLS = [
 def setup_logging(log_path: str = "agente_bot.log") -> None:
     formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
 
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(formatter)
-
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
-    logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
+
+    log_file = Path(log_path)
+    if log_file.exists() and log_file.is_dir():
+        log_file = log_file / "agente_bot.log"
+
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except OSError as exc:
+        logger.warning(
+            "No se pudo abrir archivo de log '%s'. Se usara solo consola. Motivo: %s",
+            log_file,
+            exc,
+        )
+
     logging.getLogger("urllib3.util.retry").setLevel(logging.ERROR)
 
 
