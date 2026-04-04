@@ -412,7 +412,7 @@ class WebsiteMonitor:
     def _build_status_report(self) -> str:
         results = self._check_all_urls()
         checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lines = [f"?? <b>Estado actual de servicios</b>", f"?? <b>Hora:</b> <code>{checked_at}</code>"]
+        lines = [f"📊 <b>Estado actual de servicios</b>", f"🕒 <b>Hora:</b> <code>{checked_at}</code>"]
         up_count = 0
         down_count = 0
 
@@ -423,25 +423,25 @@ class WebsiteMonitor:
             else:
                 down_count += 1
             host = urlparse(url).netloc or url
-            status_visual = "?? <b>UP</b>" if is_up else "?? <b>DOWN</b>"
+            status_visual = "🟢 <b>UP</b>" if is_up else "🔴 <b>DOWN</b>"
             http_info = str(status_code) if status_code is not None else "N/A"
             latency_info = f"{latency_ms} ms" if latency_ms is not None else "N/A"
             line = (
-                f"\n\n?? <b>{escape(host)}</b>\n"
-                f"?? {escape(url)}\n"
-                f"?? {status_visual}\n"
-                f"?? HTTP: <code>{http_info}</code>\n"
-                f"?? Latencia: <code>{latency_info}</code>"
+                f"\n\n🌐 <b>{escape(host)}</b>\n"
+                f"🔗 {escape(url)}\n"
+                f"📶 {status_visual}\n"
+                f"🧾 HTTP: <code>{http_info}</code>\n"
+                f"⏱️ Latencia: <code>{latency_info}</code>"
             )
             if error:
-                line += f"\n?? Error: <code>{escape(error)}</code>"
+                line += f"\n⚠️ Error: <code>{escape(error)}</code>"
             lines.append(line)
 
         lines.append(
-            f"\n\n?? <b>Resumen:</b>\n"
-            f"?? Activos: <b>{up_count}</b>\n"
-            f"?? Caidos: <b>{down_count}</b>\n"
-            f"?? Total: <b>{up_count + down_count}</b>"
+            f"\n\n📌 <b>Resumen:</b>\n"
+            f"🟢 Activos: <b>{up_count}</b>\n"
+            f"🔴 Caidos: <b>{down_count}</b>\n"
+            f"🧮 Total: <b>{up_count + down_count}</b>"
         )
 
         return "".join(lines)
@@ -474,25 +474,25 @@ class WebsiteMonitor:
         error: str | None,
     ) -> str:
         event_map = {
-            "INICIAL": "?? <b>Estado Inicial</b>",
-            "CAIDA": "?? <b>Servicio Caido</b>",
-            "RECUPERADO": "? <b>Servicio Recuperado</b>",
+            "INICIAL": "🔎 <b>Estado Inicial</b>",
+            "CAIDA": "🚨 <b>Servicio Caido</b>",
+            "RECUPERADO": "✅ <b>Servicio Recuperado</b>",
         }
-        status_visual = "?? <b>UP</b>" if is_up else "?? <b>DOWN</b>"
+        status_visual = "🟢 <b>UP</b>" if is_up else "🔴 <b>DOWN</b>"
         host = urlparse(url).netloc or url
         checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         http_info = str(status_code) if status_code is not None else "N/A"
         latency_info = f"{latency_ms} ms" if latency_ms is not None else "N/A"
-        error_line = f"\n?? <b>Error:</b> <code>{escape(error)}</code>" if error else ""
+        error_line = f"\n⚠️ <b>Error:</b> <code>{escape(error)}</code>" if error else ""
 
         return (
-            f"{event_map.get(event, '?? <b>Notificacion</b>')}\n"
-            f"?? <b>Sitio:</b> <code>{escape(host)}</code>\n"
-            f"?? <b>URL:</b> {escape(url)}\n"
-            f"?? <b>Estado:</b> {status_visual}\n"
-            f"?? <b>HTTP:</b> <code>{http_info}</code>\n"
-            f"?? <b>Latencia:</b> <code>{latency_info}</code>\n"
-            f"?? <b>Hora:</b> <code>{checked_at}</code>"
+            f"{event_map.get(event, '🔔 <b>Notificacion</b>')}\n"
+            f"🌐 <b>Sitio:</b> <code>{escape(host)}</code>\n"
+            f"🔗 <b>URL:</b> {escape(url)}\n"
+            f"📶 <b>Estado:</b> {status_visual}\n"
+            f"🧾 <b>HTTP:</b> <code>{http_info}</code>\n"
+            f"⏱️ <b>Latencia:</b> <code>{latency_info}</code>\n"
+            f"🕒 <b>Hora:</b> <code>{checked_at}</code>"
             f"{error_line}"
         )
 
