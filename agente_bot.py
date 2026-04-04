@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -64,6 +64,10 @@ class Settings:
     interval_seconds: int = 60
     request_timeout_seconds: int = 10
     workers: int = 4
+    bridge_url: str = ""
+    bridge_key: str = ""
+    bridge_source: str = "agente-bot-python"
+    bridge_timeout_seconds: int = 5
 
     @staticmethod
     def from_env() -> "Settings":
@@ -82,6 +86,11 @@ class Settings:
         timeout = _read_positive_int("REQUEST_TIMEOUT_SECONDS", 10)
         workers = _read_positive_int("MAX_WORKERS", 4)
 
+        bridge_url = os.getenv("BRIDGE_URL", "").strip()
+        bridge_key = os.getenv("BRIDGE_KEY", "").strip()
+        bridge_source = os.getenv("BRIDGE_SOURCE", "agente-bot-python").strip() or "agente-bot-python"
+        bridge_timeout = _read_positive_int("BRIDGE_TIMEOUT_SECONDS", 5)
+
         if not token or not chat_id:
             raise ValueError(
                 "Faltan variables de entorno requeridas: TELEGRAM_TOKEN y TELEGRAM_CHAT_ID."
@@ -97,6 +106,10 @@ class Settings:
             interval_seconds=interval,
             request_timeout_seconds=timeout,
             workers=workers,
+            bridge_url=bridge_url,
+            bridge_key=bridge_key,
+            bridge_source=bridge_source,
+            bridge_timeout_seconds=bridge_timeout,
         )
 
 
@@ -114,15 +127,30 @@ def _read_positive_int(env_name: str, default: int) -> int:
 
 
 class TelegramNotifier:
-    def __init__(self, session: requests.Session, token: str, chat_id: str, timeout: int) -> None:
+    def __init__(
+        self,
+        session: requests.Session,
+        token: str,
+        chat_id: str,
+        timeout: int,
+        bridge_url: str = "",
+        bridge_key: str = "",
+        bridge_source: str = "agente-bot-python",
+        bridge_timeout: int = 5,
+    ) -> None:
         self._session = session
         self._timeout = timeout
         self._chat_id = chat_id
         self._endpoint = f"https://api.telegram.org/bot{token}/sendMessage"
         self._updates_endpoint = f"https://api.telegram.org/bot{token}/getUpdates"
+        self._bridge_url = bridge_url
+        self._bridge_key = bridge_key
+        self._bridge_source = bridge_source
+        self._bridge_timeout = bridge_timeout
 
     def send(self, message: str) -> None:
         self.send_to_chat(chat_id=self._chat_id, message=message)
+        self.send_to_bridge(message=message)
 
     def send_to_chat(self, chat_id: str, message: str) -> None:
         try:
@@ -146,6 +174,34 @@ class TelegramNotifier:
             )
         except requests.RequestException as exc:
             logging.error("Excepcion enviando mensaje a Telegram: %s", exc)
+
+    def send_to_bridge(self, message: str) -> None:
+        if not self._bridge_url or not self._bridge_key:
+            return
+
+        try:
+            response = self._session.post(
+                self._bridge_url,
+                json={
+                    "text": message,
+                    "source": self._bridge_source,
+                },
+                headers={
+                    "x-bridge-key": self._bridge_key,
+                    "content-type": "application/json",
+                },
+                timeout=self._bridge_timeout,
+            )
+            if response.ok:
+                logging.info("Mensaje reenviado al bridge WhatsApp.")
+                return
+            logging.error(
+                "Error enviando al bridge. status=%s body=%s",
+                response.status_code,
+                response.text,
+            )
+        except requests.RequestException as exc:
+            logging.error("Excepcion enviando al bridge: %s", exc)
 
     def get_updates(self, offset: int | None = None) -> List[dict]:
         params: Dict[str, int] = {"timeout": 0}
@@ -221,6 +277,10 @@ class WebsiteMonitor:
             token=settings.telegram_token,
             chat_id=settings.telegram_chat_id,
             timeout=settings.request_timeout_seconds,
+            bridge_url=settings.bridge_url,
+            bridge_key=settings.bridge_key,
+            bridge_source=settings.bridge_source,
+            bridge_timeout=settings.bridge_timeout_seconds,
         )
 
     def stop(self) -> None:
@@ -352,7 +412,7 @@ class WebsiteMonitor:
     def _build_status_report(self) -> str:
         results = self._check_all_urls()
         checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lines = [f"📊 <b>Estado actual de servicios</b>", f"🕒 <b>Hora:</b> <code>{checked_at}</code>"]
+        lines = [f"?? <b>Estado actual de servicios</b>", f"?? <b>Hora:</b> <code>{checked_at}</code>"]
         up_count = 0
         down_count = 0
 
@@ -363,25 +423,25 @@ class WebsiteMonitor:
             else:
                 down_count += 1
             host = urlparse(url).netloc or url
-            status_visual = "🟢 <b>UP</b>" if is_up else "🔴 <b>DOWN</b>"
+            status_visual = "?? <b>UP</b>" if is_up else "?? <b>DOWN</b>"
             http_info = str(status_code) if status_code is not None else "N/A"
             latency_info = f"{latency_ms} ms" if latency_ms is not None else "N/A"
             line = (
-                f"\n\n🌐 <b>{escape(host)}</b>\n"
-                f"🔗 {escape(url)}\n"
-                f"📶 {status_visual}\n"
-                f"🧾 HTTP: <code>{http_info}</code>\n"
-                f"⏱️ Latencia: <code>{latency_info}</code>"
+                f"\n\n?? <b>{escape(host)}</b>\n"
+                f"?? {escape(url)}\n"
+                f"?? {status_visual}\n"
+                f"?? HTTP: <code>{http_info}</code>\n"
+                f"?? Latencia: <code>{latency_info}</code>"
             )
             if error:
-                line += f"\n⚠️ Error: <code>{escape(error)}</code>"
+                line += f"\n?? Error: <code>{escape(error)}</code>"
             lines.append(line)
 
         lines.append(
-            f"\n\n📌 <b>Resumen:</b>\n"
-            f"🟢 Activos: <b>{up_count}</b>\n"
-            f"🔴 Caidos: <b>{down_count}</b>\n"
-            f"🧮 Total: <b>{up_count + down_count}</b>"
+            f"\n\n?? <b>Resumen:</b>\n"
+            f"?? Activos: <b>{up_count}</b>\n"
+            f"?? Caidos: <b>{down_count}</b>\n"
+            f"?? Total: <b>{up_count + down_count}</b>"
         )
 
         return "".join(lines)
@@ -414,25 +474,25 @@ class WebsiteMonitor:
         error: str | None,
     ) -> str:
         event_map = {
-            "INICIAL": "🔎 <b>Estado Inicial</b>",
-            "CAIDA": "🚨 <b>Servicio Caido</b>",
-            "RECUPERADO": "✅ <b>Servicio Recuperado</b>",
+            "INICIAL": "?? <b>Estado Inicial</b>",
+            "CAIDA": "?? <b>Servicio Caido</b>",
+            "RECUPERADO": "? <b>Servicio Recuperado</b>",
         }
-        status_visual = "🟢 <b>UP</b>" if is_up else "🔴 <b>DOWN</b>"
+        status_visual = "?? <b>UP</b>" if is_up else "?? <b>DOWN</b>"
         host = urlparse(url).netloc or url
         checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         http_info = str(status_code) if status_code is not None else "N/A"
         latency_info = f"{latency_ms} ms" if latency_ms is not None else "N/A"
-        error_line = f"\n⚠️ <b>Error:</b> <code>{escape(error)}</code>" if error else ""
+        error_line = f"\n?? <b>Error:</b> <code>{escape(error)}</code>" if error else ""
 
         return (
-            f"{event_map.get(event, '🔔 <b>Notificacion</b>')}\n"
-            f"🌐 <b>Sitio:</b> <code>{escape(host)}</code>\n"
-            f"🔗 <b>URL:</b> {escape(url)}\n"
-            f"📶 <b>Estado:</b> {status_visual}\n"
-            f"🧾 <b>HTTP:</b> <code>{http_info}</code>\n"
-            f"⏱️ <b>Latencia:</b> <code>{latency_info}</code>\n"
-            f"🕒 <b>Hora:</b> <code>{checked_at}</code>"
+            f"{event_map.get(event, '?? <b>Notificacion</b>')}\n"
+            f"?? <b>Sitio:</b> <code>{escape(host)}</code>\n"
+            f"?? <b>URL:</b> {escape(url)}\n"
+            f"?? <b>Estado:</b> {status_visual}\n"
+            f"?? <b>HTTP:</b> <code>{http_info}</code>\n"
+            f"?? <b>Latencia:</b> <code>{latency_info}</code>\n"
+            f"?? <b>Hora:</b> <code>{checked_at}</code>"
             f"{error_line}"
         )
 
