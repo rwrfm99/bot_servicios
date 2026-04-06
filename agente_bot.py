@@ -227,7 +227,14 @@ class TelegramNotifier:
                 return []
             return payload.get("result", [])
         except (ValueError, requests.RequestException) as exc:
-            logging.error("Excepcion leyendo updates de Telegram: %s", exc)
+            exc_text = str(exc)
+            if "RemoteDisconnected" in exc_text or "Connection aborted." in exc_text:
+                logging.warning(
+                    "Conexión Telegram cerrada sin respuesta: %s. Se reintentará en el siguiente ciclo.",
+                    exc_text,
+                )
+            else:
+                logging.error("Excepcion leyendo updates de Telegram: %s", exc)
             return []
 
 
