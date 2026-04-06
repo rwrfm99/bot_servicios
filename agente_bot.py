@@ -232,9 +232,9 @@ class TelegramNotifier:
 
 def build_http_session() -> requests.Session:
     retry = Retry(
-        total=2,
-        connect=0,
-        read=0,
+        total=3,
+        connect=2,
+        read=2,
         status=2,
         backoff_factor=0.2,
         status_forcelist=(429, 500, 502, 503, 504),
