@@ -53,6 +53,7 @@ def setup_logging(log_path: str = "agente_bot.log") -> None:
         )
 
     logging.getLogger("urllib3.util.retry").setLevel(logging.ERROR)
+    logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,12 @@ def build_http_session() -> requests.Session:
     return session
 
 
+def build_telegram_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update({"User-Agent": "agente-bot-monitor/2.0"})
+    return session
+
+
 def check_website(
     session: requests.Session, url: str, timeout: int
 ) -> Tuple[bool, int | None, int | None, str | None]:
@@ -271,9 +278,10 @@ class WebsiteMonitor:
         self.last_update_id: int | None = None
         self.allowed_chat_ids = set(settings.telegram_allowed_chat_ids)
         self.heartbeat_path = Path("heartbeat.txt")
-        self.session = build_http_session()
+        self.http_session = build_http_session()
+        self.telegram_session = build_telegram_session()
         self.notifier = TelegramNotifier(
-            session=self.session,
+            session=self.telegram_session,
             token=settings.telegram_token,
             chat_id=settings.telegram_chat_id,
             timeout=settings.request_timeout_seconds,
@@ -311,7 +319,8 @@ class WebsiteMonitor:
             sleep_seconds = max(1, self.settings.interval_seconds - int(elapsed))
             self.stop_event.wait(timeout=sleep_seconds)
 
-        self.session.close()
+        self.http_session.close()
+        self.telegram_session.close()
 
     def _initialize_update_offset(self) -> None:
         updates = self.notifier.get_updates()
@@ -451,7 +460,7 @@ class WebsiteMonitor:
 
         with ThreadPoolExecutor(max_workers=min(self.settings.workers, len(self.settings.urls))) as executor:
             future_to_url = {
-                executor.submit(check_website, self.session, url, self.settings.request_timeout_seconds): url
+                executor.submit(check_website, self.http_session, url, self.settings.request_timeout_seconds): url
                 for url in self.settings.urls
             }
             for future in as_completed(future_to_url):
