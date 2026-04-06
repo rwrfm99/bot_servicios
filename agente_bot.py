@@ -62,7 +62,7 @@ class Settings:
     telegram_allowed_chat_ids: List[str]
     urls: List[str]
     interval_seconds: int = 60
-    request_timeout_seconds: int = 10
+    request_timeout_seconds: int = 30
     workers: int = 4
     bridge_url: str = ""
     bridge_key: str = ""
@@ -83,7 +83,7 @@ class Settings:
             allowed_chat_ids = [chat_id] if chat_id else []
 
         interval = _read_positive_int("CHECK_INTERVAL_SECONDS", 60)
-        timeout = _read_positive_int("REQUEST_TIMEOUT_SECONDS", 10)
+        timeout = _read_positive_int("REQUEST_TIMEOUT_SECONDS", 30)
         workers = _read_positive_int("MAX_WORKERS", 4)
 
         bridge_url = os.getenv("BRIDGE_URL", "").strip()
